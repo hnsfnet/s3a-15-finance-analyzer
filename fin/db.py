@@ -6,7 +6,16 @@ from datetime import date
 from typing import List, Optional, Dict, Any, Tuple
 from pathlib import Path
 
-from fin.models import Transaction, TransactionType, Category, CategoryStat, MonthlyStat, CompareResult
+from fin.models import (
+    Transaction,
+    TransactionType,
+    Category,
+    CategoryStat,
+    MonthlyStat,
+    CompareResult,
+    Budget,
+    BudgetPeriod,
+)
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "finance.db")
 CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config")
@@ -64,9 +73,20 @@ def init_db() -> None:
                 keywords TEXT NOT NULL DEFAULT '[]'
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS budgets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category TEXT NOT NULL,
+                limit_amount REAL NOT NULL,
+                period TEXT NOT NULL DEFAULT 'monthly',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(category, period)
+            )
+        """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_trans_date ON transactions(trans_date)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_trans_category ON transactions(category)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_trans_type ON transactions(trans_type)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_trans_source ON transactions(source)")
 
 
 def init_category_rules() -> None:
@@ -144,7 +164,8 @@ def batch_insert_transactions(transactions: List[Transaction]) -> Dict[str, int]
 
 
 def get_transactions(start_date: Optional[date] = None, end_date: Optional[date] = None,
-                     category: Optional[str] = None, trans_type: Optional[TransactionType] = None) -> List[Transaction]:
+                     category: Optional[str] = None, trans_type: Optional[TransactionType] = None,
+                     source: Optional[str] = None) -> List[Transaction]:
     sql = "SELECT * FROM transactions WHERE 1=1"
     params: List[Any] = []
     if start_date:
@@ -159,6 +180,9 @@ def get_transactions(start_date: Optional[date] = None, end_date: Optional[date]
     if trans_type:
         sql += " AND trans_type = ?"
         params.append(trans_type.value)
+    if source:
+        sql += " AND source = ?"
+        params.append(source)
     sql += " ORDER BY trans_date DESC"
     with get_connection() as conn:
         cur = conn.cursor()
@@ -179,10 +203,16 @@ def get_transactions(start_date: Optional[date] = None, end_date: Optional[date]
     return result
 
 
-def get_transactions_by_month(month_str: str) -> List[Transaction]:
+def get_transactions_by_month(month_str: str, source: Optional[str] = None) -> List[Transaction]:
+    sql = "SELECT * FROM transactions WHERE substr(trans_date, 1, 7) = ?"
+    params: List[Any] = [month_str]
+    if source:
+        sql += " AND source = ?"
+        params.append(source)
+    sql += " ORDER BY trans_date"
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT * FROM transactions WHERE substr(trans_date, 1, 7) = ? ORDER BY trans_date", (month_str,))
+        cur.execute(sql, params)
         rows = cur.fetchall()
     result = []
     for r in rows:
@@ -199,10 +229,16 @@ def get_transactions_by_month(month_str: str) -> List[Transaction]:
     return result
 
 
-def get_transactions_by_year(year: str) -> List[Transaction]:
+def get_transactions_by_year(year: str, source: Optional[str] = None) -> List[Transaction]:
+    sql = "SELECT * FROM transactions WHERE substr(trans_date, 1, 4) = ?"
+    params: List[Any] = [year]
+    if source:
+        sql += " AND source = ?"
+        params.append(source)
+    sql += " ORDER BY trans_date"
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT * FROM transactions WHERE substr(trans_date, 1, 4) = ? ORDER BY trans_date", (year,))
+        cur.execute(sql, params)
         rows = cur.fetchall()
     result = []
     for r in rows:
@@ -251,3 +287,74 @@ def get_all_categories() -> List[str]:
         cur.execute("SELECT DISTINCT category FROM transactions ORDER BY category")
         rows = cur.fetchall()
     return [r["category"] for r in rows]
+
+
+def get_all_sources() -> List[str]:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT DISTINCT source FROM transactions ORDER BY source")
+        rows = cur.fetchall()
+    return [r["source"] for r in rows]
+
+
+def set_budget(category: str, limit: float, period: BudgetPeriod = BudgetPeriod.MONTHLY) -> Budget:
+    period_val = period.value if isinstance(period, BudgetPeriod) else period
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO budgets (category, limit_amount, period)
+            VALUES (?, ?, ?)
+            ON CONFLICT(category, period) DO UPDATE SET limit_amount = excluded.limit_amount
+        """, (category, limit, period_val))
+        cur.execute("SELECT * FROM budgets WHERE category = ? AND period = ?", (category, period_val))
+        row = cur.fetchone()
+    return Budget(
+        id=row["id"],
+        category=row["category"],
+        limit=row["limit_amount"],
+        period=BudgetPeriod(row["period"]),
+    )
+
+
+def get_budgets(period: Optional[BudgetPeriod] = None) -> List[Budget]:
+    sql = "SELECT * FROM budgets WHERE 1=1"
+    params: List[Any] = []
+    if period:
+        sql += " AND period = ?"
+        params.append(period.value)
+    sql += " ORDER BY category"
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+    result = []
+    for r in rows:
+        result.append(Budget(
+            id=r["id"],
+            category=r["category"],
+            limit=r["limit_amount"],
+            period=BudgetPeriod(r["period"]),
+        ))
+    return result
+
+
+def get_budget_by_category(category: str, period: BudgetPeriod = BudgetPeriod.MONTHLY) -> Optional[Budget]:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM budgets WHERE category = ? AND period = ?", (category, period.value))
+        row = cur.fetchone()
+    if not row:
+        return None
+    return Budget(
+        id=row["id"],
+        category=row["category"],
+        limit=row["limit_amount"],
+        period=BudgetPeriod(row["period"]),
+    )
+
+
+def delete_budget(category: str, period: BudgetPeriod = BudgetPeriod.MONTHLY) -> bool:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM budgets WHERE category = ? AND period = ?", (category, period.value))
+        return cur.rowcount > 0
