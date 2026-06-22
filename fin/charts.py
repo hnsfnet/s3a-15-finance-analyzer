@@ -14,6 +14,7 @@ from fin.stats import (
     get_category_trend,
     get_source_monthly_pivot,
     get_yearly_stats,
+    compare_months,
 )
 from fin.models import YearlyReport
 
@@ -367,6 +368,62 @@ def generate_yearly_monthly_trend_chart(report: YearlyReport,
 
     if output_path is None:
         output_path = os.path.join(CHARTS_DIR, f"yearly_trend_{report.year}.png")
+    else:
+        output_path = os.path.abspath(output_path)
+
+    fig.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    return output_path
+
+
+def generate_compare_chart(month_a: str, month_b: str,
+                           output_path: Optional[str] = None) -> str:
+    _ensure_charts_dir()
+    result = compare_months(month_a, month_b)
+
+    cats_a = {d["category"]: d["month_a_amount"] for d in result.category_diffs}
+    cats_b = {d["category"]: d["month_b_amount"] for d in result.category_diffs}
+    all_cats = sorted(set(cats_a.keys()) | set(cats_b.keys()),
+                      key=lambda c: max(cats_a.get(c, 0), cats_b.get(c, 0)),
+                      reverse=True)
+
+    if not all_cats:
+        raise ValueError("无对比数据")
+
+    vals_a = [cats_a.get(c, 0.0) for c in all_cats]
+    vals_b = [cats_b.get(c, 0.0) for c in all_cats]
+
+    fig, ax = plt.subplots(figsize=(max(10, len(all_cats) * 1.2), 7))
+    x = range(len(all_cats))
+    w = 0.35
+
+    bars_a = ax.bar([i - w / 2 for i in x], vals_a, width=w,
+                    label=month_a, color="#3498DB", edgecolor="#2471A3")
+    bars_b = ax.bar([i + w / 2 for i in x], vals_b, width=w,
+                    label=month_b, color="#E74C3C", edgecolor="#B03A2E")
+
+    for bar, val in zip(bars_a, vals_a):
+        if val > 0:
+            ax.text(bar.get_x() + bar.get_width() / 2.0, bar.get_height(),
+                    f"¥{val:,.0f}", ha="center", va="bottom", fontsize=8, color="#2471A3")
+    for bar, val in zip(bars_b, vals_b):
+        if val > 0:
+            ax.text(bar.get_x() + bar.get_width() / 2.0, bar.get_height(),
+                    f"¥{val:,.0f}", ha="center", va="bottom", fontsize=8, color="#B03A2E")
+
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(all_cats, rotation=30, ha="right")
+    ax.set_ylabel("支出金额 (¥)", fontsize=12)
+    ax.legend(loc="best", fontsize=10, framealpha=0.9)
+    ax.grid(True, axis="y", linestyle="--", alpha=0.6)
+    ax.set_title(f"{month_a} vs {month_b} 支出分类对比\n"
+                 f"{month_a}: ¥{result.total_expense_a:,.2f} → "
+                 f"{month_b}: ¥{result.total_expense_b:,.2f}",
+                 fontsize=15, fontweight="bold", pad=20)
+    plt.tight_layout()
+
+    if output_path is None:
+        output_path = os.path.join(CHARTS_DIR, f"compare_{month_a}_vs_{month_b}.png")
     else:
         output_path = os.path.abspath(output_path)
 

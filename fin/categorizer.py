@@ -21,10 +21,14 @@ class Categorizer:
         if not text:
             return "未分类"
         text_lower = text.lower()
+        matches = []
         for category, keywords in self.rules.items():
             for kw in keywords:
                 if kw.lower() in text_lower:
-                    return category
+                    matches.append((len(kw), category, kw))
+        if matches:
+            matches.sort(key=lambda x: x[0], reverse=True)
+            return matches[0][1]
         return "未分类"
 
     def categorize_transaction(self, t: Transaction) -> Transaction:

@@ -45,6 +45,7 @@ from fin.charts import (
     generate_category_yearly_bar_chart,
     generate_source_compare_stacked_chart,
     generate_yearly_category_ranking_chart,
+    generate_compare_chart,
     generate_yearly_monthly_trend_chart,
     CHARTS_DIR,
 )
@@ -759,19 +760,24 @@ def categorize_cmd(retry: bool, interactive: bool, add_rule: tuple, list_rules: 
     console.print("  [green]fin categorize -l[/]  查看所有分类规则")
 
 
-@cli.command("chart", short_help="生成图表：饼图/趋势/柱状/堆叠")
+@cli.command("chart", short_help="生成图表：饼图/趋势/柱状/对比/堆叠")
 @click.option("--month", "-m", "month", help="生成当月支出饼图，格式 2024-06")
 @click.option("--trend", "-t", "trend_months", type=int, metavar="N", help="生成近 N 个月趋势折线图")
 @click.option("--category", "-g", "category", metavar="CATEGORY", help="指定分类，配合 --year 使用")
 @click.option("--year", "-y", "year", metavar="YEAR", help="指定年份，配合 --category 生成柱状图")
+@click.option("--compare", "-c", "compare", nargs=2, metavar="M1 M2", help="生成两月份对比柱状图，如 --compare 2024-05 2024-06")
 @click.option("--source-compare", "source_compare", is_flag=True, help="生成多来源对比堆叠柱状图，配合 --year 或 --trend 使用")
 @click.option("--output", "-o", "output", type=click.Path(), help="自定义输出路径")
-def chart_cmd(month: str, trend_months: int, category: str, year: str, source_compare: bool, output: str):
-    """生成图表：饼图/折线图/柱状图/多来源堆叠图，保存为 PNG"""
+def chart_cmd(month: str, trend_months: int, category: str, year: str,
+              compare: tuple, source_compare: bool, output: str):
+    """生成图表：饼图/折线图/柱状图/对比图/多来源堆叠图，保存为 PNG"""
     try:
         generated = None
 
-        if source_compare:
+        if compare:
+            with console.status(f"[bold green]生成 {compare[0]} vs {compare[1]} 对比图..."):
+                generated = generate_compare_chart(compare[0], compare[1], output)
+        elif source_compare:
             with console.status("[bold green]生成多来源对比堆叠柱状图..."):
                 generated = generate_source_compare_stacked_chart(
                     year=year,

@@ -1,7 +1,7 @@
 import os
 import csv
 import io
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import List, Dict, Tuple, Optional, Callable
 import pandas as pd
 
@@ -74,10 +74,19 @@ SOURCE_COLUMN_MAPPINGS: Dict[str, Dict[str, List[str]]] = {
 }
 
 
-def _parse_date(date_str: str) -> Optional[date]:
-    if not date_str or pd.isna(date_str) or str(date_str).strip() == "":
+def _parse_date(date_str) -> Optional[date]:
+    if date_str is None or pd.isna(date_str):
         return None
-    s = str(date_str).strip().replace("/", "-").replace(".", "-").replace("年", "-").replace("月", "-").replace("日", "")
+    s = str(date_str).strip()
+    if s == "" or s == "nan" or s == "NaT":
+        return None
+    try:
+        num = float(s)
+        if 1 <= num <= 2958465:
+            return (datetime(1899, 12, 30) + timedelta(days=num)).date()
+    except (ValueError, OverflowError):
+        pass
+    s = s.replace("/", "-").replace(".", "-").replace("年", "-").replace("月", "-").replace("日", "")
     s = s.split(" ")[0]
     for fmt in ("%Y-%m-%d", "%Y-%m", "%y-%m-%d", "%Y%m%d"):
         try:
@@ -85,9 +94,12 @@ def _parse_date(date_str: str) -> Optional[date]:
         except ValueError:
             continue
     try:
-        return pd.to_datetime(s, errors="coerce").date()
+        dt = pd.to_datetime(s, errors="coerce")
+        if pd.notna(dt):
+            return dt.date()
     except Exception:
-        return None
+        pass
+    return None
 
 
 def _parse_amount(amount_str) -> float:
@@ -96,10 +108,20 @@ def _parse_amount(amount_str) -> float:
     s = str(amount_str).strip()
     if s == "" or s == "-" or s == "--":
         return 0.0
-    s = s.replace(",", "").replace("¥", "").replace("￥", "").replace("元", "").replace(" ", "")
+    s = s.replace("¥", "").replace("￥", "").replace("元", "").replace(" ", "")
     s = s.replace("，", "")
+    negative = False
+    if s.startswith("(") and s.endswith(")"):
+        s = s[1:-1]
+        negative = True
+    elif s.startswith("-") or s.startswith("−"):
+        negative = True
+        s = s.lstrip("-").lstrip("−")
+    s = s.replace(",", "")
     try:
         val = float(s)
+        if negative:
+            val = -abs(val)
         return round(val, 2)
     except ValueError:
         return 0.0
@@ -199,12 +221,23 @@ def dataframe_to_transactions(df: pd.DataFrame, source: str) -> List[Transaction
 
         type_val = str(row[type_col]).strip() if type_col else ""
 
-        if income_val > 0 and expense_val == 0:
-            trans_type = TransactionType.INCOME
-            final_amount = income_val
-        elif expense_val > 0 and income_val == 0:
-            trans_type = TransactionType.EXPENSE
-            final_amount = expense_val
+        if (income_val > 0 or expense_val > 0) and (income_col or expense_col):
+            if income_val > 0 and expense_val <= 0:
+                trans_type = TransactionType.INCOME
+                final_amount = abs(income_val)
+            elif expense_val > 0 and income_val <= 0:
+                trans_type = TransactionType.EXPENSE
+                final_amount = abs(expense_val)
+            elif income_val > 0 and expense_val > 0:
+                if type_val and any(k in type_val for k in ["支出", "支", "debit", "借", "消费", "转出"]):
+                    trans_type = TransactionType.EXPENSE
+                    final_amount = abs(expense_val)
+                elif type_val and any(k in type_val for k in ["收入", "收", "credit", "贷", "转入", "退款"]):
+                    trans_type = TransactionType.INCOME
+                    final_amount = abs(income_val)
+                else:
+                    trans_type = TransactionType.EXPENSE
+                    final_amount = abs(expense_val)
         elif amount_val != 0:
             if type_val:
                 if any(k in type_val for k in ["收入", "收", "credit", "贷", "转入", "退款"]):
@@ -214,18 +247,18 @@ def dataframe_to_transactions(df: pd.DataFrame, source: str) -> List[Transaction
                     trans_type = TransactionType.EXPENSE
                     final_amount = abs(amount_val)
                 else:
-                    if amount_val > 0:
-                        trans_type = TransactionType.EXPENSE
-                        final_amount = amount_val
-                    else:
+                    if amount_val < 0:
                         trans_type = TransactionType.INCOME
                         final_amount = abs(amount_val)
+                    else:
+                        trans_type = TransactionType.EXPENSE
+                        final_amount = abs(amount_val)
             else:
-                if amount_val > 0:
-                    trans_type = TransactionType.EXPENSE
-                    final_amount = amount_val
-                else:
+                if amount_val < 0:
                     trans_type = TransactionType.INCOME
+                    final_amount = abs(amount_val)
+                else:
+                    trans_type = TransactionType.EXPENSE
                     final_amount = abs(amount_val)
         else:
             continue

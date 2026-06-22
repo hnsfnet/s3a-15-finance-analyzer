@@ -204,8 +204,15 @@ def get_transactions(start_date: Optional[date] = None, end_date: Optional[date]
 
 
 def get_transactions_by_month(month_str: str, source: Optional[str] = None) -> List[Transaction]:
-    sql = "SELECT * FROM transactions WHERE substr(trans_date, 1, 7) = ?"
-    params: List[Any] = [month_str]
+    parts = month_str.split("-")
+    year = int(parts[0])
+    month = int(parts[1])
+    if month == 12:
+        next_month_start = date(year + 1, 1, 1)
+    else:
+        next_month_start = date(year, month + 1, 1)
+    sql = "SELECT * FROM transactions WHERE trans_date >= ? AND trans_date < ?"
+    params: List[Any] = [f"{month_str}-01", next_month_start.isoformat()]
     if source:
         sql += " AND source = ?"
         params.append(source)
@@ -230,8 +237,8 @@ def get_transactions_by_month(month_str: str, source: Optional[str] = None) -> L
 
 
 def get_transactions_by_year(year: str, source: Optional[str] = None) -> List[Transaction]:
-    sql = "SELECT * FROM transactions WHERE substr(trans_date, 1, 4) = ?"
-    params: List[Any] = [year]
+    sql = "SELECT * FROM transactions WHERE trans_date >= ? AND trans_date < ?"
+    params: List[Any] = [f"{year}-01-01", f"{int(year) + 1}-01-01"]
     if source:
         sql += " AND source = ?"
         params.append(source)
