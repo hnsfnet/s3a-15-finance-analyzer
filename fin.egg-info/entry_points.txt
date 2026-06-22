@@ -1,0 +1,2 @@
+[console_scripts]
+fin = fin.cli:cli

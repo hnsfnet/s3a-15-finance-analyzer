@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: fin
+Version: 0.1.0
+Summary: Personal finance analyzer CLI tool
+Requires-Python: >=3.9
+Requires-Dist: pandas>=2.0.0
+Requires-Dist: matplotlib>=3.7.0
+Requires-Dist: click>=8.1.0
+Requires-Dist: rich>=13.0.0

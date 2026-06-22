@@ -1,0 +1,15 @@
+pyproject.toml
+fin/__init__.py
+fin/categorizer.py
+fin/charts.py
+fin/cli.py
+fin/db.py
+fin/importer.py
+fin/models.py
+fin/stats.py
+fin.egg-info/PKG-INFO
+fin.egg-info/SOURCES.txt
+fin.egg-info/dependency_links.txt
+fin.egg-info/entry_points.txt
+fin.egg-info/requires.txt
+fin.egg-info/top_level.txt
